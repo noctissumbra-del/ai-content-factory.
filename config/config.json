@@ -8,8 +8,8 @@
     "gemini-3.1-flash-lite",
     "gemini-flash-latest"
   ],
-  "min_words": 70,
-  "max_words": 100,
+  "min_words": 60,
+  "max_words": 90,
   "tts_provider": "gemini",
   "gemini_tts_models": [
     "gemini-3.1-flash-tts-preview",
@@ -20,5 +20,6 @@
   "voice_style": "Read this naturally, like a relaxed documentary narrator speaking to one person. Calm and low-key but at a normal conversational pace, slightly brisk, no long pauses, no exaggeration, same tone throughout",
   "voice": "en_US-ryan-high",
   "fallback_voice": "en_US-lessac-high",
-  "scene_pause_seconds": 0.2
+  "scene_pause_seconds": 0.2,
+  "target_max_seconds": 55
 }
