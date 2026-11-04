@@ -10,7 +10,15 @@
   ],
   "min_words": 75,
   "max_words": 135,
-  "voice": "en_US-ljspeech-medium",
-  "fallback_voice": "en_US-lessac-medium",
+  "tts_provider": "gemini",
+  "gemini_tts_models": [
+    "gemini-3.1-flash-tts-preview",
+    "gemini-3.8-flash-tts",
+    "gemini-2.5-flash-preview-tts"
+  ],
+  "gemini_voice": "Charon",
+  "voice_style": "Say in an energetic, curious documentary tone",
+  "voice": "en_US-ryan-high",
+  "fallback_voice": "en_US-lessac-high",
   "scene_pause_seconds": 0.3
 }
