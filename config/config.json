@@ -17,7 +17,7 @@
     "gemini-2.5-flash-preview-tts"
   ],
   "gemini_voice": "Charon",
-  "voice_style": "Read this naturally, like a relaxed documentary narrator speaking to one person. Calm and low-key but at a normal conversational pace, slightly brisk, no long pauses, no exaggeration, same tone throughout",
+  "voice_style": "Say in a calm, natural documentary voice",
   "voice": "en_US-ryan-high",
   "fallback_voice": "en_US-lessac-high",
   "scene_pause_seconds": 0.2,
