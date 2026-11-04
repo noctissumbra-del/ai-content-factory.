@@ -1,0 +1,37 @@
+{
+  "hook": "At the subatomic scale, playing the movie of physics backwards usually makes complete sense.",
+  "narration": "At the subatomic scale, playing the movie of physics backwards usually makes complete sense. If you film two particles colliding, the reversed footage follows the exact same laws of motion. For most fundamental forces, nature does not care which way the clock ticks. But there is a twist. The weak nuclear force actually breaks this rule. It treats forward and backward time differently. Even at the particle level, nature has a subtle arrow of time. The clock only truly runs one way.",
+  "scenes": [
+    {
+      "text": "At the subatomic scale, playing the movie of physics backwards usually makes complete sense.",
+      "visual": "A minimalist animation of two glowing dots bouncing off each other on a dark vertical background."
+    },
+    {
+      "text": "If you film two particles colliding, the reversed footage follows the exact same laws of motion.",
+      "visual": "A fast-forward and rewind icon overlaying the particles as they trace their paths backward."
+    },
+    {
+      "text": "For most fundamental forces, nature does not care which way the clock ticks. But there is a twist.",
+      "visual": "A stylized clock graphic spinning backwards behind a simple quantum wave representation."
+    },
+    {
+      "text": "The weak nuclear force actually breaks this rule. It treats forward and backward time differently.",
+      "visual": "A split screen showing a slight asymmetry in particle decay paths under the weak force."
+    },
+    {
+      "text": "Even at the particle level, nature has a subtle arrow of time. The clock only truly runs one way.",
+      "visual": "A single glowing particle moving steadily forward past a minimalist timeline track."
+    }
+  ],
+  "title": "Does Time Reversal Symmetry Exist in Particle Physics?",
+  "description": "Explore how fundamental forces handle time reversal symmetry in particle physics. While most laws look identical in reverse, the weak force reveals a subtle arrow of time.",
+  "hashtags": [
+    "#Physics",
+    "#QuantumMechanics",
+    "#ParticlePhysics",
+    "#Science",
+    "#Time"
+  ],
+  "id": "8b65c0fa68",
+  "topic": "Time reversal symmetry in particle physics"
+}
