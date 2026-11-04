@@ -1,6 +1,8 @@
+import array
 import base64
 import glob
 import json
+import math
 import os
 import re
 import subprocess
@@ -27,6 +29,59 @@ def log(*args):
 def wav_duration(path):
     with wave.open(path, "rb") as w:
         return w.getnframes() / w.getframerate()
+
+
+# ---------- tail cleanup (removes the TTS glitch burst at the end) ----------
+def clean_tail(path):
+    with wave.open(path, "rb") as w:
+        params = w.getparams()
+        data = w.readframes(w.getnframes())
+    if params.sampwidth != 2 or params.nchannels != 1:
+        return
+    rate = params.framerate
+    samples = array.array("h")
+    samples.frombytes(data)
+    win = int(rate * 0.05)
+    n = len(samples) // win
+    if n < 10:
+        return
+    rms = [math.sqrt(sum(x * x for x in samples[i * win:(i + 1) * win]) / win)
+           for i in range(n)]
+    p90 = sorted(rms)[int(n * 0.9)]
+    thr = max(p90 * 0.05, 30)
+    loud = [x > thr for x in rms]
+
+    i = n - 1
+    while i >= 0 and not loud[i]:
+        i -= 1
+    if i < 0:
+        return
+    seg_end = i
+    while i >= 0 and loud[i]:
+        i -= 1
+    seg_len = (seg_end - i) * 0.05
+    gap = 0
+    j = i
+    while j >= 0 and not loud[j]:
+        gap += 1
+        j -= 1
+
+    if seg_len < 0.6 and gap * 0.05 >= 0.3 and j >= 0:
+        keep = (j + 1) * win
+        log(f"Removed {(len(samples) - keep) / rate:.2f}s glitch burst at the end")
+    else:
+        keep = (seg_end + 1) * win
+    keep = min(len(samples), keep + int(rate * 0.12))
+    out = samples[:keep]
+
+    fade = min(len(out), int(rate * 0.08))
+    for k in range(fade):
+        idx = len(out) - fade + k
+        out[idx] = int(out[idx] * (1 - (k + 1) / fade))
+
+    with wave.open(path, "wb") as w:
+        w.setparams(params)
+        w.writeframes(out.tobytes())
 
 
 # ---------- Gemini TTS (one request for the whole narration) ----------
@@ -211,6 +266,7 @@ def main():
             full_text = " ".join(s["text"] for s in script["scenes"])
             model = gemini_tts(full_text, cfg, final,
                                time.time() + GEMINI_BUDGET_SECONDS)
+            clean_tail(final)
             label = f"gemini:{model}:{cfg['gemini_voice']}"
             timings = proportional_timings(script, wav_duration(final))
         except Exception as e:
@@ -220,7 +276,12 @@ def main():
     log("Voice used:", label)
 
     total = wav_duration(final)
-    log(f"Raw narration length: {total:.1f} seconds")
+    words = sum(len(s["text"].split()) for s in script["scenes"])
+    log(f"Raw narration length: {total:.1f} seconds for {words} words")
+    if total > words / 1.2:
+        log("WARNING: audio is much longer than the script. The voice may have "
+            "read the style instruction aloud. Listen to the first seconds.")
+
     target = float(cfg.get("target_max_seconds", 55))
     if total > target:
         factor = min(MAX_SPEEDUP, total / target)
