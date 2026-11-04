@@ -18,13 +18,9 @@ jobs:
         run: python src/main.py
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-      - uses: actions/upload-artifact@v4
-        with:
-          name: scripts
-          path: output/
-      - name: Save history
+      - name: Save history and script
         run: |
           git config user.name "factory-bot"
           git config user.email "factory-bot@users.noreply.github.com"
-          git add data/history.json
-          git diff --cached --quiet || (git commit -m "Update history" && git push)
+          git add data/history.json data/scripts
+          git diff --cached --quiet || (git commit -m "Add script and history" && git push)
