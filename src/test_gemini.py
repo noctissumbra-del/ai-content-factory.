@@ -6,6 +6,37 @@ import requests
 
 BASE = "https://generativelanguage.googleapis.com/v1beta"
 KEY = os.environ.get("GEMINI_API_KEY", "").strip()
+TIMEOUT = 90
+RETRY_CODES = (429, 500, 503)
+FALLBACKS = [
+    "gemini-3.5-flash-lite",
+    "gemini-3.8-flash",
+    "gemini-3.1-flash-lite",
+    "gemini-flash-latest",
+]
+
+
+def try_model(model, headers):
+    body = {"contents": [{"parts": [{"text": "Reply with exactly: Factory online."}]}]}
+    for attempt in range(1, 4):
+        try:
+            r = requests.post(
+                f"{BASE}/models/{model}:generateContent",
+                headers=headers, json=body, timeout=TIMEOUT,
+            )
+        except requests.exceptions.RequestException as e:
+            print(f"[{model}] attempt {attempt}: {type(e).__name__}")
+            time.sleep(5 * attempt)
+            continue
+        if r.status_code == 200:
+            return r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+        print(f"[{model}] attempt {attempt}: HTTP {r.status_code}")
+        if r.status_code in RETRY_CODES:
+            time.sleep(5 * attempt)
+            continue
+        print(r.text[:300])
+        return None
+    return None
 
 
 def main():
@@ -14,46 +45,21 @@ def main():
         sys.exit(1)
     headers = {"x-goog-api-key": KEY}
 
-    r = requests.get(f"{BASE}/models", headers=headers, timeout=30)
-    if r.status_code != 200:
-        print(f"ERROR listing models: HTTP {r.status_code}")
-        print(r.text[:500])
-        sys.exit(1)
-    models = [
-        m["name"].split("/")[-1]
-        for m in r.json().get("models", [])
-        if "generateContent" in m.get("supportedGenerationMethods", [])
-    ]
-    flash = [m for m in models if "flash" in m and "image" not in m]
-    print("Available text models:", ", ".join(flash) or "none found")
-
-    model = os.environ.get("GEMINI_MODEL", "").strip() or (flash[0] if flash else "")
-    if not model:
-        print("ERROR: no usable model found.")
-        sys.exit(1)
-    print("Testing model:", model)
-
-    body = {"contents": [{"parts": [{"text": "Reply with exactly: Factory online."}]}]}
-    r = None
-    for attempt in range(1, 6):
-        r = requests.post(
-            f"{BASE}/models/{model}:generateContent",
-            headers=headers, json=body, timeout=60,
-        )
-        if r.status_code == 200:
-            break
-        print(f"Attempt {attempt}: HTTP {r.status_code}")
-        if r.status_code in (429, 500, 503):
-            time.sleep(5 * attempt)
+    models = [os.environ.get("GEMINI_MODEL", "").strip()] + FALLBACKS
+    seen = set()
+    for model in models:
+        if not model or model in seen:
             continue
-        break
-    if r.status_code != 200:
-        print(r.text[:500])
-        sys.exit(1)
-
-    text = r.json()["candidates"][0]["content"]["parts"][0]["text"]
-    print("Gemini says:", text.strip())
-    print("MILESTONE 1 PASSED")
+        seen.add(model)
+        print("Testing model:", model)
+        text = try_model(model, headers)
+        if text:
+            print("Gemini says:", text)
+            print("WORKING MODEL:", model)
+            print("MILESTONE 1 PASSED")
+            return
+    print("ERROR: every model failed. See messages above.")
+    sys.exit(1)
 
 
 if __name__ == "__main__":
