@@ -14,16 +14,26 @@ def main():
     if cfg.get("emergency_stop"):
         print("Emergency stop is ON in config/config.json. Exiting.")
         return
-    picked = pick_topic()
-    print("Topic:", picked["topic"])
-    script = make_script(picked["topic"], picked["angle"])
+
+    script, picked, tried = None, None, []
+    for _ in range(3):
+        picked = pick_topic(exclude=tried)
+        tried.append(picked["topic"])
+        print("Topic:", picked["topic"])
+        try:
+            script = make_script(picked["topic"], picked["angle"])
+            break
+        except RuntimeError as e:
+            print("Topic rejected:", e)
+    if script is None:
+        raise RuntimeError("Three different topics all failed. Try again later.")
+
     vid = hashlib.sha1(picked["topic"].encode()).hexdigest()[:10]
     script["id"] = vid
     script["topic"] = picked["topic"]
 
     os.makedirs("output", exist_ok=True)
-    path = f"output/script_{vid}.json"
-    with open(path, "w", encoding="utf-8") as f:
+    with open(f"output/script_{vid}.json", "w", encoding="utf-8") as f:
         json.dump(script, f, indent=2, ensure_ascii=False)
 
     history = load_history()
