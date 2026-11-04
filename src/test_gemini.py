@@ -31,18 +31,24 @@ def main():
         sys.exit(1)
     print("Testing model:", model)
 
-    body = {"contents": [{"parts": [{"text": "Reply with exactly: Factory online."}]}]}
-    r = requests.post(
-        f"{BASE}/models/{model}:generateContent",
-        headers=headers, json=body, timeout=60,
-    )
+        body = {"contents": [{"parts": [{"text": "Reply with exactly: Factory online."}]}]}
+    r = None
+    for attempt in range(1, 6):
+        r = requests.post(
+            f"{BASE}/models/{model}:generateContent",
+            headers=headers, json=body, timeout=60,
+        )
+        if r.status_code == 200:
+            break
+        print(f"Attempt {attempt}: HTTP {r.status_code}")
+        if r.status_code in (429, 500, 503):
+            time.sleep(5 * attempt)
+            continue
+        break
     if r.status_code != 200:
-        print(f"ERROR generating: HTTP {r.status_code}")
         print(r.text[:500])
         sys.exit(1)
     text = r.json()["candidates"][0]["content"]["parts"][0]["text"]
-    print("Gemini says:", text.strip())
-    print("MILESTONE 1 PASSED")
 
 
 if __name__ == "__main__":
