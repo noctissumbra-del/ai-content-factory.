@@ -33,10 +33,10 @@ def is_duplicate(topic, history):
     )
 
 
-def pick_topic():
+def pick_topic(exclude=()):
     cfg = load_config()
     history = load_history()
-    recent = [h["topic"] for h in history[-100:]]
+    recent = [h["topic"] for h in history[-100:]] + list(exclude)
     prompt = (
         f"You are a researcher for a short-video channel about {cfg['niche']}: "
         f"{cfg['niche_description']}.\n"
@@ -51,6 +51,6 @@ def pick_topic():
         ideas = next((v for v in ideas.values() if isinstance(v, list)), [])
     for idea in ideas:
         topic = str(idea.get("topic", "")).strip()
-        if topic and not is_duplicate(topic, history):
+        if topic and topic not in exclude and not is_duplicate(topic, history):
             return {"topic": topic, "angle": str(idea.get("angle", "")).strip()}
     raise RuntimeError("No new topic found (all ideas were duplicates).")
