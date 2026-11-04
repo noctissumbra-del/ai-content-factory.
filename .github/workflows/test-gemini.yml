@@ -4,42 +4,94 @@ name: Test Gemini AI
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
 
     steps:
       - name: Test Gemini API
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+
         run: |
           set -euo pipefail
 
-          curl -sS -f \
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent" \
+          if [ -z "$GEMINI_API_KEY" ]; then
+            echo "ERROR: GEMINI_API_KEY secret is missing."
+            exit 1
+          fi
+
+          echo "Connecting to Gemini..."
+
+          HTTP_STATUS=$(curl -sS \
+            --retry 5 \
+            --retry-all-errors \
+            --retry-delay 5 \
+            --retry-max-time 90 \
+            -w "%{http_code}" \
+            -o response.json \
+            -X POST \
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent" \
             -H "x-goog-api-key: ${GEMINI_API_KEY}" \
             -H "Content-Type: application/json" \
             -d '{
               "contents": [{
                 "parts": [{
-                  "text": "Write a 100-word engaging YouTube Shorts script about a mysterious anime fact. Include a strong hook."
+                  "text": "Write an original, engaging 100-word YouTube Shorts script about a mysterious anime fact. Start with a powerful hook. Keep it factual, entertaining and suitable for a general audience."
                 }]
               }]
-            }' \
-            -o response.json
+            }') || {
+              echo "ERROR: Could not connect to Gemini."
+              exit 1
+            }
+
+          if [ "$HTTP_STATUS" != "200" ]; then
+            echo "Gemini returned HTTP status: $HTTP_STATUS"
+            python - <<'PY'
+          import json
+
+          try:
+              with open("response.json") as f:
+                  data = json.load(f)
+              error = data.get("error", {})
+              print(error.get("message", "Unknown API error"))
+          except Exception:
+              print("Could not read API error response.")
+          PY
+            exit 1
+          fi
+
+          echo "Gemini connection successful!"
 
           python - <<'PY'
           import json
 
-          with open("response.json") as f:
+          with open("response.json", encoding="utf-8") as f:
               data = json.load(f)
 
           candidates = data.get("candidates", [])
-          if not candidates:
-              raise SystemExit("No response candidates returned.")
 
-          for part in candidates[0]["content"]["parts"]:
-              if "text" in part:
-                  print(part["text"])
+          if not candidates:
+              raise SystemExit("ERROR: Gemini returned no candidates.")
+
+          parts = candidates[0].get("content", {}).get("parts", [])
+
+          script = "\n".join(
+              part.get("text", "")
+              for part in parts
+              if part.get("text")
+          )
+
+          if not script.strip():
+              raise SystemExit("ERROR: Empty script received.")
+
+          print("\n========== GENERATED SCRIPT ==========\n")
+          print(script)
+          print("\n======================================")
           PY
-          
+
+          echo "AI script test completed successfully!"
