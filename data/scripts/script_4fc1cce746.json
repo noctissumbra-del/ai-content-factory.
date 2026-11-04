@@ -1,0 +1,45 @@
+{
+  "title": "How Glass Frogs Hide Their Blood",
+  "description": "Discover the unique biology of glass frogs, which hide most of their red blood cells in their liver to become nearly transparent while sleeping. This incredible adaptation helps them evade predators without causing fatal blood clots.",
+  "hashtags": [
+    "#nature",
+    "#science",
+    "#biology",
+    "#animals",
+    "#wildlife"
+  ],
+  "hook": "This tiny frog hides most of its red blood cells to vanish.",
+  "narration": "This tiny frog hides most of its red blood cells to vanish. When a glass frog goes to sleep during the day, it becomes see-through. To pull this off, it packs about ninety percent of its red blood cells into its liver. This blocks the red pigment that predators would normally spot. Somehow, the frog manages to do this without clotting to death. When it wakes up, the cells circulate again. Nature found a clever way to turn blood into a cloak.",
+  "scenes": [
+    {
+      "text": "This tiny frog hides most of its red blood cells to vanish.",
+      "visual": "A small green glass frog sitting on a vibrant green leaf."
+    },
+    {
+      "text": "When a glass frog goes to sleep during the day, it becomes see-through.",
+      "visual": "A transparent glass frog resting, showing its internal organs."
+    },
+    {
+      "text": "To pull this off, it packs about ninety percent of its red blood cells into its liver.",
+      "visual": "A simplified diagram highlighting the frog's liver gathering red blood cells."
+    },
+    {
+      "text": "This blocks the red pigment that predators would normally spot.",
+      "visual": "An illustration showing a predator's silhouette looking past the hidden red color."
+    },
+    {
+      "text": "Somehow, the frog manages to do this without clotting to death.",
+      "visual": "A close-up of the frog's skin looking clear and healthy."
+    },
+    {
+      "text": "When it wakes up, the cells circulate again.",
+      "visual": "The frog stretching as red blood cells spread back through its body."
+    },
+    {
+      "text": "Nature found a clever way to turn blood into a cloak.",
+      "visual": "The glass frog blending completely into the green foliage."
+    }
+  ],
+  "id": "4fc1cce746",
+  "topic": "Glass Frogs hiding their blood"
+}
