@@ -32,8 +32,8 @@ def main():
     script["id"] = vid
     script["topic"] = picked["topic"]
 
-    os.makedirs("output", exist_ok=True)
-    with open(f"output/script_{vid}.json", "w", encoding="utf-8") as f:
+    os.makedirs("data/scripts", exist_ok=True)
+    with open(f"data/scripts/script_{vid}.json", "w", encoding="utf-8") as f:
         json.dump(script, f, indent=2, ensure_ascii=False)
 
     history = load_history()
