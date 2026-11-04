@@ -1,0 +1,41 @@
+{
+  "title": "Quantum Entanglement Explained",
+  "description": "Explore the strange connection of quantum entanglement, where measuring one particle determines the state of its twin across any distance. Learn how quantum mechanics describes this fascinating phenomenon.",
+  "hashtags": [
+    "#quantumphysics",
+    "#science",
+    "#physics",
+    "#quantum",
+    "#stem"
+  ],
+  "hook": "Two particles can share a single, connected reality across the universe.",
+  "narration": "Two particles can share a single, connected reality across the universe. When you measure one particle, you determine the exact state of its twin. It does not matter if the twin is across the room or across the galaxy. Albert Einstein famously called this spooky action at a distance. Modern quantum mechanics successfully explains how this connection works through mathematics, even though it defies our everyday logic. They remain linked as a single system. Nature is far stranger than it appears.",
+  "scenes": [
+    {
+      "text": "Two particles can share a single, connected reality across the universe.",
+      "visual": "A minimalist animation of two glowing blue dots connected by a thin line against a dark background."
+    },
+    {
+      "text": "When you measure one particle, you determine the exact state of its twin.",
+      "visual": "One dot changes color to red, and the other dot simultaneously changes to blue."
+    },
+    {
+      "text": "It does not matter if the twin is across the room or across the galaxy.",
+      "visual": "The two dots drift far apart on screen while the connecting line stretches out."
+    },
+    {
+      "text": "Albert Einstein famously called this spooky action at a distance.",
+      "visual": "A simple sketch of a vintage notepad with abstract mathematical equations fading in."
+    },
+    {
+      "text": "Modern quantum mechanics successfully explains how this connection works through mathematics, even though it defies our everyday logic.",
+      "visual": "Clean mathematical wave equations gently glowing and shifting behind the two dots."
+    },
+    {
+      "text": "They remain linked as a single system. Nature is far stranger than it appears.",
+      "visual": "The two distant particles pulse in sync before fading into a calm starry background."
+    }
+  ],
+  "id": "b461d98f1a",
+  "topic": "Quantum entanglement"
+}
