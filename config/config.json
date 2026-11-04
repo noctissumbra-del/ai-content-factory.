@@ -8,8 +8,8 @@
     "gemini-3.1-flash-lite",
     "gemini-flash-latest"
   ],
-  "min_words": 75,
-  "max_words": 135,
+  "min_words": 70,
+  "max_words": 100,
   "tts_provider": "gemini",
   "gemini_tts_models": [
     "gemini-3.1-flash-tts-preview",
@@ -17,8 +17,8 @@
     "gemini-2.5-flash-preview-tts"
   ],
   "gemini_voice": "Charon",
-  "voice_style": "Read this naturally and calmly, like a relaxed documentary narrator speaking to one person. Steady pace, low-key, no exaggeration, no excitement, same tone throughout",
+  "voice_style": "Read this naturally, like a relaxed documentary narrator speaking to one person. Calm and low-key but at a normal conversational pace, slightly brisk, no long pauses, no exaggeration, same tone throughout",
   "voice": "en_US-ryan-high",
   "fallback_voice": "en_US-lessac-high",
-  "scene_pause_seconds": 0.3
+  "scene_pause_seconds": 0.2
 }
