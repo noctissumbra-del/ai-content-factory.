@@ -9,5 +9,8 @@
     "gemini-flash-latest"
   ],
   "min_words": 75,
-  "max_words": 135
+  "max_words": 135,
+  "voice": "en_US-ljspeech-medium",
+  "fallback_voice": "en_US-lessac-medium",
+  "scene_pause_seconds": 0.3
 }
