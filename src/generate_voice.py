@@ -191,8 +191,8 @@ def main():
                    "scenes": timings}, f, indent=2, ensure_ascii=False)
 
     print(f"Narration length: {total:.1f} seconds")
-    if total < 15 or total > 75:
-        raise RuntimeError(f"Narration is {total:.1f}s, outside the 15-75s safe range.")
+    if total < 15 or total > 62:
+        raise RuntimeError(f"Narration is {total:.1f}s, outside the 15-62s safe range.")
     if not 25 <= total <= 62:
         print("WARNING: aim for 30-60 seconds.")
     print("MILESTONE 3 PASSED")
