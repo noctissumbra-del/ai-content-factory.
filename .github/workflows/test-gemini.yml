@@ -1,0 +1,45 @@
+
+name: Test Gemini AI
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Test Gemini API
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          set -euo pipefail
+
+          curl -sS -f \
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent" \
+            -H "x-goog-api-key: ${GEMINI_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "contents": [{
+                "parts": [{
+                  "text": "Write a 100-word engaging YouTube Shorts script about a mysterious anime fact. Include a strong hook."
+                }]
+              }]
+            }' \
+            -o response.json
+
+          python - <<'PY'
+          import json
+
+          with open("response.json") as f:
+              data = json.load(f)
+
+          candidates = data.get("candidates", [])
+          if not candidates:
+              raise SystemExit("No response candidates returned.")
+
+          for part in candidates[0]["content"]["parts"]:
+              if "text" in part:
+                  print(part["text"])
+          PY
+          
