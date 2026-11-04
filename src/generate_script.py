@@ -26,8 +26,9 @@ def validate(s, cfg):
 
 def fact_check(narration):
     prompt = (
-        "You are a strict science fact-checker. Review this narration for factual "
-        "errors, exaggerations, or claims that cannot be verified. "
+        "You are a science fact-checker for a popular-science channel. Flag ONLY clear "
+        "factual errors or claims that are plainly false or misleading. Do NOT flag "
+        "rounding, simplification, or wording style. "
         'Return JSON: {"ok": true/false, "issues": ["..."]}.\n\n' + narration
     )
     res = generate(prompt, as_json=True)
@@ -46,7 +47,9 @@ def make_script(topic, angle):
             "Rules: first sentence is a hook that creates curiosity in under 2 seconds "
             "(max 15 words, no 'Did you know'). Plain spoken English, short sentences, "
             f"{cfg['min_words']}-{cfg['max_words']} words of narration total, ends with a "
-            "punchy closing line. Only well-established facts. Do not mention any "
+            "punchy closing line. Only well-established facts. Use words like 'about' "
+            "or 'roughly' for numbers and never exaggerate (no 'instantly', 'would "
+            "collapse', etc). Do not mention any "
             "copyrighted characters, brands, or people's quotes.\n"
             f"{feedback}\n"
             "Return JSON with keys: hook (string), narration (full spoken text, starting "
