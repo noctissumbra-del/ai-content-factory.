@@ -16,14 +16,20 @@ from gemini_client import load_config
 BASE = "https://generativelanguage.googleapis.com/v1beta"
 HF = "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0"
 VOICE_DIR = "assets/voices"
-GEMINI_BUDGET_SECONDS = 240
+GEMINI_BUDGET_SECONDS = 300
+MAX_SPEEDUP = 1.15
 
 
 def log(*args):
     print(*args, flush=True)
 
 
-# ---------- Gemini TTS ----------
+def wav_duration(path):
+    with wave.open(path, "rb") as w:
+        return w.getnframes() / w.getframerate()
+
+
+# ---------- Gemini TTS (one request for the whole narration) ----------
 def gemini_tts(text, cfg, out_path, deadline):
     key = os.environ.get("GEMINI_API_KEY", "").strip()
     if not key:
@@ -39,16 +45,16 @@ def gemini_tts(text, cfg, out_path, deadline):
     }
     last = "no models tried"
     for model in cfg["gemini_tts_models"]:
-        for attempt in range(1, 3):
+        for attempt in range(1, 4):
             if time.time() > deadline:
                 raise RuntimeError("Gemini time budget used up. Last: " + last)
             try:
                 r = requests.post(f"{BASE}/models/{model}:generateContent",
-                                  headers=headers, json=body, timeout=45)
+                                  headers=headers, json=body, timeout=60)
             except requests.exceptions.RequestException as e:
                 last = f"{model}: {type(e).__name__}"
                 log("  retry:", last)
-                time.sleep(3)
+                time.sleep(5)
                 continue
             if r.status_code == 200:
                 try:
@@ -67,11 +73,26 @@ def gemini_tts(text, cfg, out_path, deadline):
                 return model
             last = f"{model}: HTTP {r.status_code}"
             log("  retry:", last)
-            if r.status_code in (429, 500, 503):
-                time.sleep(4)
+            if r.status_code == 429:
+                time.sleep(20)
+                continue
+            if r.status_code in (500, 503):
+                time.sleep(5)
                 continue
             break
     raise RuntimeError(last)
+
+
+def proportional_timings(script, total):
+    chars = [max(1, len(s["text"])) for s in script["scenes"]]
+    whole = sum(chars)
+    timings, t = [], 0.0
+    for i, (scene, c) in enumerate(zip(script["scenes"], chars)):
+        dur = total * c / whole
+        timings.append({"index": i, "text": scene["text"], "visual": scene["visual"],
+                        "start": round(t, 2), "end": round(t + dur, 2)})
+        t += dur
+    return timings
 
 
 # ---------- Piper fallback ----------
@@ -103,39 +124,63 @@ def piper_synth(text, model, out_path):
     raise RuntimeError("Piper failed: " + last)
 
 
-def piper_model(cfg):
+def piper_narration(script, cfg, out_dir, final):
+    model, label = None, None
     for voice in (cfg["voice"], cfg["fallback_voice"]):
         try:
             model = ensure_voice(voice)
-            piper_synth("Test.", model, "output/_test.wav")
-            os.remove("output/_test.wav")
-            return voice, model
+            piper_synth("Test.", model, f"{out_dir}/_test.wav")
+            os.remove(f"{out_dir}/_test.wav")
+            label = f"piper:{voice}"
+            break
         except Exception as e:
             log(f"Piper voice {voice} failed: {e}")
-    raise RuntimeError("No working Piper voice.")
+    if model is None:
+        raise RuntimeError("No working Piper voice.")
 
-
-# ---------- shared ----------
-def render_scenes(script, cfg, out_dir, provider):
     parts = []
-    total = len(script["scenes"])
-    if provider == "gemini":
-        deadline = time.time() + GEMINI_BUDGET_SECONDS
-        label = None
-        for i, scene in enumerate(script["scenes"]):
-            wav = f"{out_dir}/scene_{i:02d}.wav"
-            model = gemini_tts(scene["text"], cfg, wav, deadline)
-            log(f"Scene {i + 1}/{total} voiced by {model}")
-            label = f"gemini:{model}:{cfg['gemini_voice']}"
-            parts.append((wav, scene))
-        return label, parts
-    voice, model = piper_model(cfg)
     for i, scene in enumerate(script["scenes"]):
         wav = f"{out_dir}/scene_{i:02d}.wav"
         piper_synth(scene["text"], model, wav)
-        log(f"Scene {i + 1}/{total} voiced by piper")
+        log(f"Scene {i + 1}/{len(script['scenes'])} voiced by piper")
         parts.append((wav, scene))
-    return f"piper:{voice}", parts
+
+    with wave.open(parts[0][0], "rb") as w:
+        rate, width, channels = w.getframerate(), w.getsampwidth(), w.getnchannels()
+    pause = float(cfg["scene_pause_seconds"])
+    silence = b"\x00" * (int(pause * rate) * width * channels)
+
+    timings, t = [], 0.0
+    with wave.open(final, "wb") as out:
+        out.setnchannels(channels)
+        out.setsampwidth(width)
+        out.setframerate(rate)
+        for i, (wav, scene) in enumerate(parts):
+            with wave.open(wav, "rb") as w:
+                frames = w.readframes(w.getnframes())
+                dur = w.getnframes() / w.getframerate()
+            out.writeframes(frames)
+            end = t + dur
+            timings.append({"index": i, "text": scene["text"], "visual": scene["visual"],
+                            "start": round(t, 2), "end": round(end, 2)})
+            if i < len(parts) - 1:
+                out.writeframes(silence)
+                end += pause
+            t = end
+    for wav, _ in parts:
+        os.remove(wav)
+    return label, timings
+
+
+# ---------- speed adjust ----------
+def speed_up(path, factor):
+    tmp = path + ".fast.wav"
+    subprocess.run(
+        ["ffmpeg", "-y", "-loglevel", "error", "-i", path,
+         "-filter:a", f"atempo={factor:.3f}", tmp],
+        check=True,
+    )
+    os.replace(tmp, path)
 
 
 def latest_script():
@@ -158,54 +203,43 @@ def main():
 
     out_dir = f"output/voice_{script['id']}"
     os.makedirs(out_dir, exist_ok=True)
+    final = f"{out_dir}/narration.wav"
 
-    label, parts = None, None
+    label, timings = None, None
     if cfg.get("tts_provider", "gemini") == "gemini":
         try:
-            label, parts = render_scenes(script, cfg, out_dir, "gemini")
+            full_text = " ".join(s["text"] for s in script["scenes"])
+            model = gemini_tts(full_text, cfg, final,
+                               time.time() + GEMINI_BUDGET_SECONDS)
+            label = f"gemini:{model}:{cfg['gemini_voice']}"
+            timings = proportional_timings(script, wav_duration(final))
         except Exception as e:
             log("Gemini TTS failed, falling back to Piper:", e)
-    if parts is None:
-        label, parts = render_scenes(script, cfg, out_dir, "piper")
+    if timings is None:
+        label, timings = piper_narration(script, cfg, out_dir, final)
     log("Voice used:", label)
 
-    with wave.open(parts[0][0], "rb") as w:
-        rate, width, channels = w.getframerate(), w.getsampwidth(), w.getnchannels()
-    pause = float(cfg["scene_pause_seconds"])
-    silence = b"\x00" * (int(pause * rate) * width * channels)
+    total = wav_duration(final)
+    log(f"Raw narration length: {total:.1f} seconds")
+    target = float(cfg.get("target_max_seconds", 55))
+    if total > target:
+        factor = min(MAX_SPEEDUP, total / target)
+        speed_up(final, factor)
+        new_total = wav_duration(final)
+        scale = new_total / total
+        for t in timings:
+            t["start"] = round(t["start"] * scale, 2)
+            t["end"] = round(t["end"] * scale, 2)
+        log(f"Sped up x{factor:.2f}")
+        total = new_total
 
-    timings, t = [], 0.0
-    final = f"{out_dir}/narration.wav"
-    with wave.open(final, "wb") as out:
-        out.setnchannels(channels)
-        out.setsampwidth(width)
-        out.setframerate(rate)
-        for i, (wav, scene) in enumerate(parts):
-            with wave.open(wav, "rb") as w:
-                frames = w.readframes(w.getnframes())
-                dur = w.getnframes() / w.getframerate()
-            out.writeframes(frames)
-            end = t + dur
-            timings.append({"index": i, "text": scene["text"], "visual": scene["visual"],
-                            "start": round(t, 2), "end": round(end, 2)})
-            if i < len(parts) - 1:
-                out.writeframes(silence)
-                end += pause
-            t = end
-    for wav, _ in parts:
-        os.remove(wav)
-
-    with wave.open(final, "rb") as w:
-        total = w.getnframes() / w.getframerate()
     with open(f"{out_dir}/timings.json", "w", encoding="utf-8") as f:
         json.dump({"id": script["id"], "voice": label, "total_seconds": round(total, 2),
                    "scenes": timings}, f, indent=2, ensure_ascii=False)
 
-    log(f"Narration length: {total:.1f} seconds")
+    log(f"Final narration length: {total:.1f} seconds")
     if total < 15 or total > 62:
         raise RuntimeError(f"Narration is {total:.1f}s, outside the 15-62s range.")
-    if not 25 <= total <= 58:
-        log("WARNING: aim for 30-58 seconds.")
     log("MILESTONE 3 PASSED")
 
 
