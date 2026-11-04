@@ -1,5 +1,7 @@
 import os
 import sys
+import time
+
 import requests
 
 BASE = "https://generativelanguage.googleapis.com/v1beta"
@@ -31,7 +33,7 @@ def main():
         sys.exit(1)
     print("Testing model:", model)
 
-        body = {"contents": [{"parts": [{"text": "Reply with exactly: Factory online."}]}]}
+    body = {"contents": [{"parts": [{"text": "Reply with exactly: Factory online."}]}]}
     r = None
     for attempt in range(1, 6):
         r = requests.post(
@@ -48,7 +50,10 @@ def main():
     if r.status_code != 200:
         print(r.text[:500])
         sys.exit(1)
+
     text = r.json()["candidates"][0]["content"]["parts"][0]["text"]
+    print("Gemini says:", text.strip())
+    print("MILESTONE 1 PASSED")
 
 
 if __name__ == "__main__":
