@@ -22,5 +22,6 @@
   "fallback_voice": "en_US-lessac-high",
   "scene_pause_seconds": 0.2,
   "target_max_seconds": 55,
-  "use_nasa_images": true
+  "use_nasa_images": true,
+  "min_relevance": 4
 }
