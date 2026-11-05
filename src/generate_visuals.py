@@ -1,3 +1,4 @@
+import base64
 import glob
 import hashlib
 import io
@@ -17,6 +18,7 @@ from gemini_client import generate, load_config
 W, H = 1080, 1920
 NASA_SEARCH = "https://images-api.nasa.gov/search"
 NASA_ASSET = "https://images-api.nasa.gov/asset/"
+GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta"
 
 # Skip images likely to show identifiable people or carry third-party rights.
 AVOID = (
@@ -94,8 +96,11 @@ def scene_queries(script):
     prompt = (
         "For each scene below, write search terms for NASA's public image library "
         "that would find a real, relevant space or science photo or image.\n"
-        "Rules: 'query' is 2-4 words of concrete nouns (examples: 'GPS satellite orbit', "
-        "'Earth from space', 'atomic clock'). 'alt_query' is a broader 1-2 word "
+        "Rules: 'query' is 2-4 words of concrete nouns that name something a "
+        "telescope or spacecraft can photograph (examples: 'GPS satellite orbit', "
+        "'Earth from space', 'spiral galaxy'). Never use abstract words like "
+        "'mathematics', 'concept' or 'background'; for an abstract idea pick a fitting "
+        "real object such as 'galaxy' or 'nebula'. 'alt_query' is a broader 1-2 word "
         "fallback (example: 'satellite'). No people names, no brand names, no "
         "astronauts.\n"
         f"Scenes:\n{lines}\n"
@@ -122,7 +127,8 @@ def scene_queries(script):
 
 
 # ---------------------------------------------------------------- NASA images
-def nasa_find(query, used_ids):
+def nasa_candidates(query, used_ids, limit=5):
+    """Top search hits that pass the text filters, each with a small thumbnail."""
     try:
         r = requests.get(
             NASA_SEARCH,
@@ -131,11 +137,12 @@ def nasa_find(query, used_ids):
         )
         if r.status_code != 200:
             log(f"  NASA search HTTP {r.status_code} for '{query}'")
-            return None
+            return []
         items = r.json()["collection"]["items"]
     except (requests.exceptions.RequestException, KeyError, ValueError) as e:
         log(f"  NASA search failed for '{query}': {type(e).__name__}")
-        return None
+        return []
+    out = []
     for it in items:
         d = (it.get("data") or [{}])[0]
         nid = d.get("nasa_id")
@@ -146,8 +153,81 @@ def nasa_find(query, used_ids):
             continue
         if any(w in blob for w in AVOID) or any(w in blob for w in RIGHTS_FLAGS):
             continue
-        return {"id": nid, "title": title, "center": d.get("center", "")}
-    return None
+        href = ((it.get("links") or [{}])[0].get("href") or "").replace("http://", "https://")
+        if not href:
+            continue
+        try:
+            tr = requests.get(href, timeout=30)
+            im = Image.open(io.BytesIO(tr.content))
+            im.thumbnail((512, 512))
+            buf = io.BytesIO()
+            im.convert("RGB").save(buf, "JPEG", quality=80)
+        except Exception:
+            continue
+        out.append({"id": nid, "title": title, "center": d.get("center", ""),
+                    "thumb": buf.getvalue()})
+        if len(out) >= limit:
+            break
+    return out
+
+
+def pick_best(scene, cands, cfg):
+    """Ask Gemini to look at the candidates. Returns (index or None, note)."""
+    key = os.environ.get("GEMINI_API_KEY", "").strip()
+    if not key or not cands:
+        return None, "no key or no candidates"
+    min_rel = float(cfg.get("min_relevance", 4))
+    prompt = (
+        "You are choosing the background image for one scene of a short, vertical "
+        "science video.\n"
+        f'Scene narration: "{scene["text"]}"\n'
+        f'Visual idea: {scene["visual"]}\n'
+        "Look at the candidate images below and pick the single best one. Rules: "
+        "(1) it must contain NO people, faces or crowds; (2) no readable text, "
+        "logos, charts or watermarks; (3) it should fit the narration, either by "
+        "showing the subject or by giving a fitting atmosphere for it (space "
+        "imagery is fine for abstract science ideas); (4) prefer striking, clean "
+        "images. Rate how well it fits from 0 to 10.\n"
+        'Return JSON only: {"best": <image number, or -1 if none are acceptable>, '
+        '"relevance": <0-10>, "reason": "<short>"}'
+    )
+    parts = [{"text": prompt}]
+    for i, c in enumerate(cands):
+        parts.append({"text": f"Image {i} (title: {c['title']}):"})
+        parts.append({"inline_data": {"mime_type": "image/jpeg",
+                                      "data": base64.b64encode(c["thumb"]).decode()}})
+    body = {"contents": [{"parts": parts}],
+            "generationConfig": {"responseMimeType": "application/json"}}
+    headers = {"x-goog-api-key": key}
+    last = "vision call failed"
+    for model in (cfg.get("models") or ["gemini-3.5-flash-lite"]):
+        for attempt in (1, 2):
+            try:
+                r = requests.post(f"{GEMINI_BASE}/models/{model}:generateContent",
+                                  headers=headers, json=body, timeout=60)
+            except requests.exceptions.RequestException as e:
+                last = f"{model}: {type(e).__name__}"
+                time.sleep(3)
+                continue
+            if r.status_code == 200:
+                try:
+                    res = json.loads(r.json()["candidates"][0]["content"]["parts"][0]["text"])
+                    if isinstance(res, list) and res:
+                        res = res[0]
+                    best, rel = int(res.get("best", -1)), float(res.get("relevance", 0))
+                    reason = str(res.get("reason", ""))[:80]
+                except (KeyError, IndexError, ValueError, TypeError, AttributeError):
+                    last = f"{model}: unreadable answer"
+                    break
+                if 0 <= best < len(cands) and rel >= min_rel:
+                    return best, f"{model} chose #{best}, relevance {rel:g}: {reason}"
+                return None, f"judge rejected all ({rel:g}): {reason}"
+            last = f"{model}: HTTP {r.status_code}"
+            if r.status_code in (429, 500, 503):
+                time.sleep(6 * attempt)
+                continue
+            break
+    return None, last
 
 
 def pick_hrefs(hrefs):
@@ -209,12 +289,28 @@ def cover(img, w, h):
     return img.crop((x, y, x + w, y + h))
 
 
+def trim_black(img):
+    """Crop away solid black borders (some NASA images are framed in black)."""
+    box = img.convert("L").point(lambda p: 255 if p > 14 else 0).getbbox()
+    if not box:
+        return img
+    pad = int(0.01 * max(img.size))
+    l, t = max(0, box[0] - pad), max(0, box[1] - pad)
+    r, b = min(img.width, box[2] + pad), min(img.height, box[3] + pad)
+    if (r - l) < 400 or (b - t) < 400:
+        return img
+    if (r - l) * (b - t) > 0.97 * img.width * img.height:
+        return img
+    return img.crop((l, t, r, b))
+
+
 def compose_photo(img):
+    img = trim_black(img)
     if img.width / img.height < 0.8:
         frame = ImageEnhance.Brightness(cover(img, W, H)).enhance(0.9)
     else:
         bg = cover(img, W, H).filter(ImageFilter.GaussianBlur(40))
-        bg = ImageEnhance.Brightness(bg).enhance(0.45)
+        bg = ImageEnhance.Brightness(bg).enhance(0.55)
         fg_w, fg_h = W, round(img.height * W / img.width)
         if fg_h > H * 0.62:
             fg_h = int(H * 0.62)
@@ -261,6 +357,121 @@ def procedural(seed_text):
     # planet (with optional ring)
     lit, dark, atmo = rnd.choice(PLANETS)
     d = rnd.randint(380, 640)
+    px = rnd.randint(int(W * 0.30), int(W * 0.70))
+    py = rnd.randint(int(H * 0.18), int(H * 0.50))
+    if rnd.random() < 0.5:
+        ring = Image.new("RGBA", (W * 2, W * 2), (0, 0, 0, 0))
+        rd = ImageDraw.Draw(ring)
+        rw, rh = int(d * 1.9), int(d * 0.45)
+        rd.ellipse((W - rw // 2, W - rh // 2, W + rw // 2, W + rh // 2),
+                   outline=atmo + (150,), width=6)
+        ring = ring.rotate(rnd.randint(-28, 28), resample=Image.BICUBIC)
+        img.alpha_composite(ring.crop((W - px, W - py, 2 * W - px, 2 * W - py)))
+    halo = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    ImageDraw.Draw(halo).ellipse(
+        (px - d // 2 - 30, py - d // 2 - 30, px + d // 2 + 30, py + d // 2 + 30),
+        fill=atmo + (120,))
+    img = Image.alpha_composite(img, halo.filter(ImageFilter.GaussianBlur(45)))
+    g = Image.radial_gradient("L").resize((2 * d, 2 * d))
+    off = int(0.65 * d)
+    g = g.crop((off, off, off + d, off + d))
+    surface = Image.composite(Image.new("RGB", (d, d), dark),
+                              Image.new("RGB", (d, d), lit), g)
+    pm = Image.new("L", (d * 4, d * 4), 0)
+    ImageDraw.Draw(pm).ellipse((0, 0, d * 4 - 1, d * 4 - 1), fill=255)
+    pm = pm.resize((d, d), Image.LANCZOS)
+    img.paste(surface, (px - d // 2, py - d // 2), pm)
+
+    return darken(img.convert("RGB"))
+
+
+def contact_sheet(paths, out_path):
+    cw, ch, gap = 270, 480, 12
+    cols = 3
+    rows = math.ceil(len(paths) / cols)
+    sheet = Image.new("RGB", (cols * (cw + gap) + gap, rows * (ch + gap) + gap), (20, 20, 20))
+    for i, p in enumerate(paths):
+        im = Image.open(p).resize((cw, ch), Image.LANCZOS)
+        sheet.paste(im, (gap + (i % cols) * (cw + gap), gap + (i // cols) * (ch + gap)))
+    sheet.save(out_path, quality=85)
+
+
+# ---------------------------------------------------------------- main
+def main():
+    cfg = load_config()
+    if cfg.get("emergency_stop"):
+        log("Emergency stop is ON. Exiting.")
+        return
+
+    with open(latest_script(), encoding="utf-8") as f:
+        script = json.load(f)
+    log("Script:", script["title"])
+    scenes = script["scenes"]
+    timings = get_timings(script)
+    queries = scene_queries(script)
+
+    out_dir = f"output/visuals_{script['id']}"
+    os.makedirs(out_dir, exist_ok=True)
+    use_nasa = cfg.get("use_nasa_images", True)
+    used, manifest, paths = set(), [], []
+
+    for i, scene in enumerate(scenes):
+        frame, source, credit, q_used = None, "procedural", None, None
+        if use_nasa:
+            for q in (queries[i]["query"], queries[i]["alt_query"]):
+                cands = nasa_candidates(q, used)
+                if not cands:
+                    continue
+                idx, note = pick_best(scene, cands, cfg)
+                log(f"  '{q}': {len(cands)} candidates -> {note}")
+                time.sleep(4)
+                if idx is None:
+                    continue
+                hit = cands[idx]
+                img = nasa_download(hit["id"])
+                if img is not None:
+                    used.add(hit["id"])
+                    frame = compose_photo(img)
+                    source, q_used = "nasa", q
+                    credit = f"NASA ({hit['center']}): {hit['title']} [{hit['id']}]"
+                    break
+        if frame is None:
+            frame = procedural(f"{script['id']}-{i}-{scene['visual']}")
+        path = f"{out_dir}/scene_{i:02d}.jpg"
+        frame.save(path, quality=92)
+        paths.append(path)
+        log(f"Scene {i + 1}/{len(scenes)}: {source}"
+            + (f" (query '{q_used}')" if q_used else ""))
+        manifest.append({
+            "index": i, "file": path, "source": source, "credit": credit,
+            "query": q_used, "text": scene["text"],
+            "start": timings[i][0], "end": timings[i][1],
+        })
+
+    contact_sheet(paths, f"{out_dir}/preview.jpg")
+    credits = [m["credit"] for m in manifest if m["credit"]]
+    with open(f"{out_dir}/manifest.json", "w", encoding="utf-8") as f:
+        json.dump({"id": script["id"], "scenes": manifest, "credits": credits},
+                  f, indent=2, ensure_ascii=False)
+
+    for m in manifest:
+        with Image.open(m["file"]) as im:
+            if im.size != (W, H):
+                raise RuntimeError(f"{m['file']} has wrong size {im.size}")
+    if len(manifest) < 4:
+        raise RuntimeError("Fewer than 4 scenes. The script needs at least 4.")
+
+    n_nasa = sum(1 for m in manifest if m["source"] == "nasa")
+    log(f"Summary: {n_nasa} NASA images, {len(manifest) - n_nasa} original drawings")
+    log("MILESTONE 4 PASSED")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as e:
+        log("FAILED:", e)
+        sys.exit(1)nd.randint(380, 640)
     px = rnd.randint(int(W * 0.30), int(W * 0.70))
     py = rnd.randint(int(H * 0.18), int(H * 0.50))
     if rnd.random() < 0.5:
