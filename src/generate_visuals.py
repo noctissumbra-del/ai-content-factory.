@@ -471,6 +471,237 @@ if __name__ == "__main__":
         main()
     except Exception as e:
         log("FAILED:", e)
+        sys.exit(1)ed(imgs, key=rank)[:3]
+
+
+def nasa_download(nid):
+    try:
+        r = requests.get(NASA_ASSET + nid, timeout=30)
+        if r.status_code != 200:
+            return None
+        hrefs = [i.get("href", "") for i in r.json()["collection"]["items"]]
+    except (requests.exceptions.RequestException, KeyError, ValueError):
+        return None
+    for url in pick_hrefs(hrefs):
+        try:
+            resp = requests.get(url, timeout=60)
+            if resp.status_code != 200 or len(resp.content) > 15_000_000:
+                continue
+            img = Image.open(io.BytesIO(resp.content))
+            img.load()
+        except Exception:
+            continue
+        if min(img.size) >= 500:
+            return img.convert("RGB")
+    return None
+
+
+# ---------------------------------------------------------------- drawing
+def darken(img):
+    """Dark gradient at top and bottom so captions stay readable."""
+    mask = Image.new("L", (1, H))
+    for y in range(H):
+        t = y / H
+        a = 0
+        if t < 0.15:
+            a = int(110 * (1 - t / 0.15))
+        if t > 0.50:
+            a = max(a, int(185 * ((t - 0.50) / 0.50) ** 1.3))
+        mask.putpixel((0, y), a)
+    mask = mask.resize((W, H))
+    return Image.composite(Image.new("RGB", (W, H), (0, 0, 0)), img, mask)
+
+
+def cover(img, w, h):
+    s = max(w / img.width, h / img.height)
+    nw, nh = max(w, round(img.width * s)), max(h, round(img.height * s))
+    img = img.resize((nw, nh), Image.LANCZOS)
+    x, y = (nw - w) // 2, (nh - h) // 2
+    return img.crop((x, y, x + w, y + h))
+
+
+def trim_black(img):
+    """Crop away solid black borders (some NASA images are framed in black)."""
+    box = img.convert("L").point(lambda p: 255 if p > 14 else 0).getbbox()
+    if not box:
+        return img
+    pad = int(0.01 * max(img.size))
+    l, t = max(0, box[0] - pad), max(0, box[1] - pad)
+    r, b = min(img.width, box[2] + pad), min(img.height, box[3] + pad)
+    if (r - l) < 400 or (b - t) < 400:
+        return img
+    if (r - l) * (b - t) > 0.97 * img.width * img.height:
+        return img
+    return img.crop((l, t, r, b))
+
+
+def compose_photo(img):
+    img = trim_black(img)
+    if img.width / img.height < 0.8:
+        frame = ImageEnhance.Brightness(cover(img, W, H)).enhance(0.9)
+    else:
+        bg = cover(img, W, H).filter(ImageFilter.GaussianBlur(40))
+        bg = ImageEnhance.Brightness(bg).enhance(0.55)
+        fg_w, fg_h = W, round(img.height * W / img.width)
+        if fg_h > H * 0.62:
+            fg_h = int(H * 0.62)
+            fg_w = round(img.width * fg_h / img.height)
+        fg = img.resize((fg_w, fg_h), Image.LANCZOS)
+        frame = bg.copy()
+        frame.paste(fg, ((W - fg_w) // 2, int(H * 0.40 - fg_h / 2)))
+    return darken(frame)
+
+
+def procedural(seed_text):
+    """Original space art drawn from scratch. Same text always gives same picture."""
+    rnd = random.Random(int(hashlib.md5(seed_text.encode()).hexdigest(), 16))
+    top, bottom, glow = rnd.choice(PALETTES)
+    grad = Image.linear_gradient("L").resize((W, H))
+    img = Image.composite(Image.new("RGB", (W, H), bottom),
+                          Image.new("RGB", (W, H), top), grad).convert("RGBA")
+
+    neb = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    nd = ImageDraw.Draw(neb)
+    for _ in range(rnd.randint(4, 7)):
+        cx, cy = rnd.randint(0, W), rnd.randint(0, int(H * 0.8))
+        rx, ry = rnd.randint(200, 480), rnd.randint(250, 600)
+        col = tuple(max(0, min(255, c + rnd.randint(-20, 40))) for c in glow)
+        nd.ellipse((cx - rx, cy - ry, cx + rx, cy + ry),
+                   fill=col + (rnd.randint(60, 120),))
+    img = Image.alpha_composite(img, neb.filter(ImageFilter.GaussianBlur(130)))
+
+    # stars (drawn first so the planet sits in front of them)
+    stars = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    sd = ImageDraw.Draw(stars)
+    for _ in range(420):
+        x, y, r = rnd.randint(0, W - 1), rnd.randint(0, H - 1), rnd.choice((1, 1, 1, 2))
+        sd.ellipse((x - r, y - r, x + r, y + r), fill=(255, 255, 255, rnd.randint(90, 220)))
+    big = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    bd = ImageDraw.Draw(big)
+    for _ in range(16):
+        x, y, r = rnd.randint(0, W - 1), rnd.randint(0, H - 1), rnd.randint(3, 5)
+        bd.ellipse((x - r, y - r, x + r, y + r), fill=(255, 255, 255, 230))
+    img = Image.alpha_composite(img, stars)
+    img = Image.alpha_composite(img, big.filter(ImageFilter.GaussianBlur(2.5)))
+    img = Image.alpha_composite(img, big)
+
+    # planet (with optional ring)
+    lit, dark, atmo = rnd.choice(PLANETS)
+    d = rnd.randint(380, 640)
+    px = rnd.randint(int(W * 0.30), int(W * 0.70))
+    py = rnd.randint(int(H * 0.18), int(H * 0.50))
+    if rnd.random() < 0.5:
+        ring = Image.new("RGBA", (W * 2, W * 2), (0, 0, 0, 0))
+        rd = ImageDraw.Draw(ring)
+        rw, rh = int(d * 1.9), int(d * 0.45)
+        rd.ellipse((W - rw // 2, W - rh // 2, W + rw // 2, W + rh // 2),
+                   outline=atmo + (150,), width=6)
+        ring = ring.rotate(rnd.randint(-28, 28), resample=Image.BICUBIC)
+        img.alpha_composite(ring.crop((W - px, W - py, 2 * W - px, 2 * W - py)))
+    halo = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    ImageDraw.Draw(halo).ellipse(
+        (px - d // 2 - 30, py - d // 2 - 30, px + d // 2 + 30, py + d // 2 + 30),
+        fill=atmo + (120,))
+    img = Image.alpha_composite(img, halo.filter(ImageFilter.GaussianBlur(45)))
+    g = Image.radial_gradient("L").resize((2 * d, 2 * d))
+    off = int(0.65 * d)
+    g = g.crop((off, off, off + d, off + d))
+    surface = Image.composite(Image.new("RGB", (d, d), dark),
+                              Image.new("RGB", (d, d), lit), g)
+    pm = Image.new("L", (d * 4, d * 4), 0)
+    ImageDraw.Draw(pm).ellipse((0, 0, d * 4 - 1, d * 4 - 1), fill=255)
+    pm = pm.resize((d, d), Image.LANCZOS)
+    img.paste(surface, (px - d // 2, py - d // 2), pm)
+
+    return darken(img.convert("RGB"))
+
+
+def contact_sheet(paths, out_path):
+    cw, ch, gap = 270, 480, 12
+    cols = 3
+    rows = math.ceil(len(paths) / cols)
+    sheet = Image.new("RGB", (cols * (cw + gap) + gap, rows * (ch + gap) + gap), (20, 20, 20))
+    for i, p in enumerate(paths):
+        im = Image.open(p).resize((cw, ch), Image.LANCZOS)
+        sheet.paste(im, (gap + (i % cols) * (cw + gap), gap + (i // cols) * (ch + gap)))
+    sheet.save(out_path, quality=85)
+
+
+# ---------------------------------------------------------------- main
+def main():
+    cfg = load_config()
+    if cfg.get("emergency_stop"):
+        log("Emergency stop is ON. Exiting.")
+        return
+
+    with open(latest_script(), encoding="utf-8") as f:
+        script = json.load(f)
+    log("Script:", script["title"])
+    scenes = script["scenes"]
+    timings = get_timings(script)
+    queries = scene_queries(script)
+
+    out_dir = f"output/visuals_{script['id']}"
+    os.makedirs(out_dir, exist_ok=True)
+    use_nasa = cfg.get("use_nasa_images", True)
+    used, manifest, paths = set(), [], []
+
+    for i, scene in enumerate(scenes):
+        frame, source, credit, q_used = None, "procedural", None, None
+        if use_nasa:
+            for q in (queries[i]["query"], queries[i]["alt_query"]):
+                cands = nasa_candidates(q, used)
+                if not cands:
+                    continue
+                idx, note = pick_best(scene, cands, cfg)
+                log(f"  '{q}': {len(cands)} candidates -> {note}")
+                time.sleep(4)
+                if idx is None:
+                    continue
+                hit = cands[idx]
+                img = nasa_download(hit["id"])
+                if img is not None:
+                    used.add(hit["id"])
+                    frame = compose_photo(img)
+                    source, q_used = "nasa", q
+                    credit = f"NASA ({hit['center']}): {hit['title']} [{hit['id']}]"
+                    break
+        if frame is None:
+            frame = procedural(f"{script['id']}-{i}-{scene['visual']}")
+        path = f"{out_dir}/scene_{i:02d}.jpg"
+        frame.save(path, quality=92)
+        paths.append(path)
+        log(f"Scene {i + 1}/{len(scenes)}: {source}"
+            + (f" (query '{q_used}')" if q_used else ""))
+        manifest.append({
+            "index": i, "file": path, "source": source, "credit": credit,
+            "query": q_used, "text": scene["text"],
+            "start": timings[i][0], "end": timings[i][1],
+        })
+
+    contact_sheet(paths, f"{out_dir}/preview.jpg")
+    credits = [m["credit"] for m in manifest if m["credit"]]
+    with open(f"{out_dir}/manifest.json", "w", encoding="utf-8") as f:
+        json.dump({"id": script["id"], "scenes": manifest, "credits": credits},
+                  f, indent=2, ensure_ascii=False)
+
+    for m in manifest:
+        with Image.open(m["file"]) as im:
+            if im.size != (W, H):
+                raise RuntimeError(f"{m['file']} has wrong size {im.size}")
+    if len(manifest) < 4:
+        raise RuntimeError("Fewer than 4 scenes. The script needs at least 4.")
+
+    n_nasa = sum(1 for m in manifest if m["source"] == "nasa")
+    log(f"Summary: {n_nasa} NASA images, {len(manifest) - n_nasa} original drawings")
+    log("MILESTONE 4 PASSED")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as e:
+        log("FAILED:", e)
         sys.exit(1)nd.randint(380, 640)
     px = rnd.randint(int(W * 0.30), int(W * 0.70))
     py = rnd.randint(int(H * 0.18), int(H * 0.50))
